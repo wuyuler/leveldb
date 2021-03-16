@@ -1315,6 +1315,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
         代码见下面
      */
     WriteBatch* write_batch = BuildBatchGroup(&last_writer);
+    //6. 设置写入数据的sequence
     WriteBatchInternal::SetSequence(write_batch, last_sequence + 1);
     last_sequence += WriteBatchInternal::Count(write_batch);
 
@@ -1322,9 +1323,11 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     // during this phase since &w is currently responsible for logging
     // and protects against concurrent loggers and concurrent writes
     // into mem_.
-    {
+    {//7. 释放互斥锁,这里代码保证同一时刻只有一个线程会执行写入操作(只有一个writers_里面的一个能到达这里.)
       mutex_.Unlock();
+      //8. 写日志(WAL)
       status = log_->AddRecord(WriteBatchInternal::Contents(write_batch));
+      //9. 根据参数决定是否sync日志
       bool sync_error = false;
       if (status.ok() && options.sync) {
         status = logfile_->Sync();
@@ -1333,21 +1336,25 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
         }
       }
       if (status.ok()) {
+        //10. 更新Memtable
         status = WriteBatchInternal::InsertInto(write_batch, mem_);
       }
+      //11. 获取互斥锁
       mutex_.Lock();
       if (sync_error) {
+        //12. 如果sync失败, 设置bg_error,后续所有写入都失败
         // The state of the log file is indeterminate: the log record we
         // just added may or may not show up when the DB is re-opened.
         // So we force the DB into a mode where all future writes fail.
         RecordBackgroundError(status);
       }
     }
+    //12. 清空临时合并的批量操作
     if (write_batch == tmp_batch_) tmp_batch_->Clear();
-
+    //13. 更新LastSequence
     versions_->SetLastSequence(last_sequence);
   }
-
+  //13. 通知所有数据已经被写入的线程
   while (true) {
     Writer* ready = writers_.front();
     writers_.pop_front();
@@ -1358,7 +1365,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     }
     if (ready == last_writer) break;
   }
-
+  //14. 通知还在写队列排队的线程
   // Notify new head of write queue
   if (!writers_.empty()) {
     writers_.front()->cv.Signal();
