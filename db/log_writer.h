@@ -17,7 +17,7 @@ class WritableFile;
 
 namespace log {
 
-class Writer {
+class Writer {//接收待写入数据，组织数据格式，调用成员变量完成数据真正写入到文件系统
  public:
   // Create a writer that will append data to "*dest".
   // "*dest" must be initially empty.

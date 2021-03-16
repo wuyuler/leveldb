@@ -41,11 +41,11 @@ Status Writer::AddRecord(const Slice& slice) {
   Status s;
   bool begin = true;
   do {
-    const int leftover = kBlockSize - block_offset_;
+    const int leftover = kBlockSize - block_offset_;//日志内部是以多个Block存储,每个Block是固定大小(便于恢复时读取)
     assert(leftover >= 0);
-    if (leftover < kHeaderSize) {
+    if (leftover < kHeaderSize) {//块剩余空间小于header
       // Switch to a new block
-      if (leftover > 0) {
+      if (leftover > 0) {//将剩余补零
         // Fill the trailer (literal below relies on kHeaderSize being 7)
         static_assert(kHeaderSize == 7, "");
         dest_->Append(Slice("\x00\x00\x00\x00\x00\x00", leftover));

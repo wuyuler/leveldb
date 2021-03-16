@@ -46,9 +46,9 @@ struct DBImpl::Writer {
 
   Status status;//执行结果
   WriteBatch* batch;//更新的数据(1~多个key-value)
-  bool sync;
-  bool done;
-  port::CondVar cv;
+  bool sync;//是否flush
+  bool done;//是否已经执行
+  port::CondVar cv;//并发控制的条件变量
 };
 
 struct DBImpl::CompactionState {
@@ -1285,21 +1285,35 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
   w.batch = updates;
   w.sync = options.sync;
   w.done = false;
-
+  //2. 获取互斥锁,将自己写入队列, 等待条件变量通知
   MutexLock l(&mutex_);
   writers_.push_back(&w);
-  while (!w.done && &w != writers_.front()) {
+  while (!w.done && &w != writers_.front()) {//两种情况跳出等待,1)本次写操作已由其它线程代为写入 2)本次写操作成为写队列的队首
+  //这里涉及 LevelDB 写操作的并发控制和性能优化：由于 MemTable 和 WAL 都不支持并发写入，
+  //所以只有写队列队首的 writer 会执行真正的写入。
+  //队首的 writer 会将队列中的多个请求合并成一个请求，然后执行批量写入，并更新各个 writer 的状态。
     w.cv.Wait();
   }
+  //3. 如果已经被其它线程完成写入了，直接返回结果。否则就是队首 writer 了，继续往下执行。
   if (w.done) {
     return w.status;
   }
-
+  //4. 这里是检查memtable有没有空间可以写入, 如果没有就换一个buffer 和 compaction等操作
   // May temporarily unlock and wait.
   Status status = MakeRoomForWrite(updates == nullptr);
+  //5. 调用BuildBatchGroup将队首开始多个符合条件的writer合并到tmp_batch
   uint64_t last_sequence = versions_->LastSequence();
   Writer* last_writer = &w;
   if (status.ok() && updates != nullptr) {  // nullptr batch is for compactions
+    /*  主要的地方就是这个BuildBatchGroup 函数, 这个函数做的是将这个队列里面前几个的Writer, 合并成一个Batch.
+        这么做的原因我想主要也是为了性能考虑, 因为这里我们每一次的Put, 都是一个batch, 所以这里会将多个的batch
+        合并成一个Batch来进行处理, 主要是为了减少写log 的时候写磁盘的次数,
+        因此比较这次write 里面磁盘IO 是占用最大的.
+        所以这里将队列的前几个Batch合并成了一个Batch, 由当前的Batch处理了. 所以刚才上面那个代码会判断一下当前的这个
+        Write 是否已经被处理好了
+
+        代码见下面
+     */
     WriteBatch* write_batch = BuildBatchGroup(&last_writer);
     WriteBatchInternal::SetSequence(write_batch, last_sequence + 1);
     last_sequence += WriteBatchInternal::Count(write_batch);
@@ -1367,9 +1381,9 @@ WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
   // Allow the group to grow up to a maximum size, but if the
   // original write is small, limit the growth so we do not slow
   // down the small write too much.
-  size_t max_size = 1 << 20;
+  size_t max_size = 1 << 20;//合并写入的数据大小,默认max_size是1MB
   if (size <= (128 << 10)) {
-    max_size = size + (128 << 10);
+    max_size = size + (128 << 10);//如果第一个写请求的size比较小,改为size+128KB,防止数据小的请求被其他请求拖慢
   }
 
   *last_writer = first;
@@ -1377,7 +1391,7 @@ WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
   ++iter;  // Advance past "first"
   for (; iter != writers_.end(); ++iter) {
     Writer* w = *iter;
-    if (w->sync && !first->sync) {
+    if (w->sync && !first->sync) {//如果第一个写请求 sync == false，那么就不要加入 sync == true 的写请求。
       // Do not include a sync write into a batch handled by a non-sync write.
       break;
     }
