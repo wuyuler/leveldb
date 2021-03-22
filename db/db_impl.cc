@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include<iostream>
+
 #include "db/builder.h"
 #include "db/db_iter.h"
 #include "db/dbformat.h"
@@ -1590,6 +1592,8 @@ DB::~DB() = default;
 //dbname - 保存数据的目录名。
 //dbptr - 初始化成功的 LevelDB 实例保存在 *dbptr。
 Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
+  //测试
+  std::cout<<"--------------------------打开数据库:"<<dbname<<std::endl;
   *dbptr = nullptr;
   //1. 创建DBImpl对象：DBImpl的构造函数会做一些简单的初始化工作
   DBImpl* impl = new DBImpl(options, dbname);

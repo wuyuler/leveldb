@@ -790,7 +790,7 @@ class Benchmark {
 
   void WriteRandom(ThreadState* thread) { DoWrite(thread, false); }
 
-  void DoWrite(ThreadState* thread, bool seq) {
+  void DoWrite(ThreadState* thread, bool seq) {//seq决定是是否是顺序写入
     if (num_ != FLAGS_num) {
       char msg[100];
       std::snprintf(msg, sizeof(msg), "(%d ops)", num_);
@@ -802,14 +802,14 @@ class Benchmark {
     Status s;
     int64_t bytes = 0;
     KeyBuffer key;
-    for (int i = 0; i < num_; i += entries_per_batch_) {
+    for (int i = 0; i < num_; i += entries_per_batch_) {//每批entries_per_batch_条数据, 传入num_条(即FLAGS_num条)
       batch.Clear();
       for (int j = 0; j < entries_per_batch_; j++) {
         const int k = seq ? i + j : thread->rand.Uniform(FLAGS_num);
         key.Set(k);
         batch.Put(key.slice(), gen.Generate(value_size_));
         bytes += value_size_ + key.slice().size();
-        thread->stats.FinishedSingleOp();
+        thread->stats.FinishedSingleOp();//时间计算
       }
       s = db_->Write(write_options_, &batch);
       if (!s.ok()) {
