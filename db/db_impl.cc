@@ -783,7 +783,7 @@ void DBImpl::BackgroundCall() {
 void DBImpl::BackgroundCompaction() {
   mutex_.AssertHeld();
 
-  if (imm_ != nullptr) {
+  if (imm_ != nullptr) {//imm_是否为空
     CompactMemTable();
     return;
   }
@@ -791,7 +791,7 @@ void DBImpl::BackgroundCompaction() {
   Compaction* c;
   bool is_manual = (manual_compaction_ != nullptr);
   InternalKey manual_end;
-  if (is_manual) {
+  if (is_manual) {//手动compaction
     ManualCompaction* m = manual_compaction_;
     c = versions_->CompactRange(m->level, m->begin, m->end);
     m->done = (c == nullptr);
@@ -803,8 +803,8 @@ void DBImpl::BackgroundCompaction() {
         m->level, (m->begin ? m->begin->DebugString().c_str() : "(begin)"),
         (m->end ? m->end->DebugString().c_str() : "(end)"),
         (m->done ? "(end)" : manual_end.DebugString().c_str()));
-  } else {
-    c = versions_->PickCompaction();
+  } else {//不考虑手动compaction
+    c = versions_->PickCompaction();//选择一个compaction
   }
 
   Status status;

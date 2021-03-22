@@ -1253,9 +1253,10 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
 Compaction* VersionSet::PickCompaction() {
   Compaction* c;
   int level;
-
+  
   // We prefer compactions triggered by too much data in a level over
   // the compactions triggered by seeks.
+  //两种需要compaction的情况,一种是某一Level的分数超过1, 一种是某一个文件的查询次数超过阈值.
   const bool size_compaction = (current_->compaction_score_ >= 1);
   const bool seek_compaction = (current_->file_to_compact_ != nullptr);
   if (size_compaction) {
